@@ -26,4 +26,9 @@ if [ "$changed" = "1" ]; then
     chown -R node:node /paperclip
 fi
 
+# Railway volumes are created as root — ensure node can write
+if [ -d /paperclip ] && [ "$(stat -c '%u' /paperclip 2>/dev/null || stat -f '%u' /paperclip)" != "$PUID" ]; then
+    chown -R node:node /paperclip
+fi
+
 exec gosu node "$@"
