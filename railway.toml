@@ -3,7 +3,7 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-healthcheckPath = "/health"
-healthcheckTimeout = 300
+# No HTTP healthcheck — server in authenticated mode returns 403 to unauthenticated probes.
+# Railway falls back to TCP port check (verifies port 3100 is listening).
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
