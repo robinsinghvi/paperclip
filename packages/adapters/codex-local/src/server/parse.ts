@@ -1,5 +1,54 @@
 import { asString, asNumber, parseObject, parseJson } from "@paperclipai/adapter-utils/server-utils";
 
+/**
+ * OpenAI model pricing per million tokens (USD).
+ * The Codex CLI does not emit cost data in its JSONL output, so we estimate
+ * from token counts. Update these when OpenAI changes pricing.
+ * Cached input tokens are priced at 50% of input (OpenAI standard discount).
+ */
+const MODEL_PRICING_PER_MILLION: Record<string, { input: number; output: number }> = {
+  "gpt-5.4":             { input: 2.50, output: 10.00 },
+  "gpt-5.4-mini":        { input: 0.40, output: 1.60 },
+  "gpt-5.4-nano":        { input: 0.10, output: 0.40 },
+  "gpt-5.4-pro":         { input: 10.00, output: 40.00 },
+  "gpt-5.3-codex":       { input: 2.50, output: 10.00 },
+  "gpt-5.2-codex":       { input: 2.50, output: 10.00 },
+  "gpt-5.2":             { input: 2.50, output: 10.00 },
+  "gpt-5.2-pro":         { input: 10.00, output: 40.00 },
+  "gpt-5.1-codex":       { input: 2.00, output: 8.00 },
+  "gpt-5.1-codex-mini":  { input: 0.30, output: 1.20 },
+  "gpt-5.1-codex-max":   { input: 8.00, output: 32.00 },
+  "gpt-5.1":             { input: 2.00, output: 8.00 },
+  "gpt-5-codex":         { input: 2.00, output: 8.00 },
+  "gpt-5":               { input: 2.00, output: 8.00 },
+  "gpt-5-mini":          { input: 0.30, output: 1.20 },
+  "gpt-5-nano":          { input: 0.10, output: 0.40 },
+  "gpt-5-pro":           { input: 10.00, output: 40.00 },
+};
+const DEFAULT_PRICING = { input: 2.50, output: 10.00 };
+
+function resolveModelPricing(model: string): { input: number; output: number } {
+  if (!model) return DEFAULT_PRICING;
+  const exact = MODEL_PRICING_PER_MILLION[model];
+  if (exact) return exact;
+  // Strip date suffixes (e.g., "gpt-5.3-codex-2026-01-15" → "gpt-5.3-codex")
+  const stripped = model.replace(/-\d{4}-\d{2}-\d{2}$/, "");
+  return MODEL_PRICING_PER_MILLION[stripped] ?? DEFAULT_PRICING;
+}
+
+export function estimateCostUsd(
+  usage: { inputTokens: number; cachedInputTokens: number; outputTokens: number },
+  model: string,
+): number {
+  const pricing = resolveModelPricing(model);
+  const uncachedInput = Math.max(0, usage.inputTokens - usage.cachedInputTokens);
+  const cachedInput = usage.cachedInputTokens;
+  const inputCost = (uncachedInput / 1_000_000) * pricing.input;
+  const cachedCost = (cachedInput / 1_000_000) * pricing.input * 0.5;
+  const outputCost = (usage.outputTokens / 1_000_000) * pricing.output;
+  return inputCost + cachedCost + outputCost;
+}
+
 export function parseCodexJsonl(stdout: string) {
   let sessionId: string | null = null;
   const messages: string[] = [];

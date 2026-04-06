@@ -23,7 +23,7 @@ import {
   joinPromptSections,
   runChildProcess,
 } from "@paperclipai/adapter-utils/server-utils";
-import { parseCodexJsonl, isCodexUnknownSessionError } from "./parse.js";
+import { parseCodexJsonl, isCodexUnknownSessionError, estimateCostUsd } from "./parse.js";
 import { pathExists, prepareManagedCodexHome, resolveManagedCodexHomeDir, resolveSharedCodexHomeDir } from "./codex-home.js";
 import { resolveCodexDesiredSkillNames } from "./skills.js";
 
@@ -605,7 +605,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       biller: resolveCodexBiller(effectiveEnv, billingType),
       model,
       billingType,
-      costUsd: null,
+      costUsd: estimateCostUsd(attempt.parsed.usage, model),
       resultJson: {
         stdout: attempt.proc.stdout,
         stderr: attempt.proc.stderr,
