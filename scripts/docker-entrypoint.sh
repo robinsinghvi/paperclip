@@ -61,4 +61,57 @@ if [ -n "${GRAMMS_REPO_URL:-}" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
     fi
 fi
 
+# Write .mcp.json into the cloned Gramms repo so Claude Code agents get MCP
+# server access. Gated on EMAIL_USER so non-Gramms deployments are unaffected.
+# BetterStack is an HTTP MCP (no local process). Email uses imap-email-mcp (stdio).
+REPO_DIR=/paperclip/repos/gramms-ai-v2
+if [ -d "$REPO_DIR" ] && [ -n "${EMAIL_USER:-}" ]; then
+    MCP_JSON="$REPO_DIR/.mcp.json"
+    # Build the mcpServers object
+    MCP_SERVERS=""
+
+    # Email MCP (imap-email-mcp) — requires EMAIL_USER + EMAIL_PASS
+    if [ -n "${EMAIL_PASS:-}" ]; then
+        MCP_SERVERS="\"email\": {
+      \"command\": \"npx\",
+      \"args\": [\"-y\", \"imap-email-mcp\"],
+      \"env\": {
+        \"IMAP_HOST\": \"${EMAIL_IMAP_HOST:-imap.secureserver.net}\",
+        \"IMAP_PORT\": \"${EMAIL_IMAP_PORT:-993}\",
+        \"SMTP_HOST\": \"${EMAIL_SMTP_HOST:-smtpout.secureserver.net}\",
+        \"SMTP_PORT\": \"${EMAIL_SMTP_PORT:-465}\",
+        \"EMAIL_USER\": \"${EMAIL_USER}\",
+        \"EMAIL_PASS\": \"${EMAIL_PASS}\"
+      }
+    }"
+    fi
+
+    # BetterStack HTTP MCP — requires BETTERSTACK_API_TOKEN
+    if [ -n "${BETTERSTACK_API_TOKEN:-}" ]; then
+        if [ -n "$MCP_SERVERS" ]; then
+            MCP_SERVERS="$MCP_SERVERS,
+    "
+        fi
+        MCP_SERVERS="${MCP_SERVERS}\"betterstack\": {
+      \"type\": \"http\",
+      \"url\": \"https://mcp.betterstack.com\",
+      \"headers\": {
+        \"Authorization\": \"Bearer ${BETTERSTACK_API_TOKEN}\"
+      }
+    }"
+    fi
+
+    if [ -n "$MCP_SERVERS" ]; then
+        cat > "$MCP_JSON" <<MCPEOF
+{
+  "mcpServers": {
+    $MCP_SERVERS
+  }
+}
+MCPEOF
+        chown node:node "$MCP_JSON"
+        echo "[entrypoint] wrote .mcp.json with MCP config into $REPO_DIR"
+    fi
+fi
+
 exec gosu node "$@"

@@ -54,7 +54,31 @@ ARG USER_UID=1000
 ARG USER_GID=1000
 WORKDIR /app
 COPY --chown=node:node --from=build /app /app
-RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai \
+# Chromium + browser deps for Remotion video rendering and agent-browser automation
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
+    fonts-liberation \
+    libasound2t64 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    xdg-utils \
+  && rm -rf /var/lib/apt/lists/*
+
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+  PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+  CHROMIUM_PATH=/usr/bin/chromium
+
+RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai agent-browser \
   && mkdir -p /paperclip \
   && chown node:node /paperclip
 
