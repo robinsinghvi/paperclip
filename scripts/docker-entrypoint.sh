@@ -70,7 +70,8 @@ if [ -d "$REPO_DIR" ] && [ -n "${EMAIL_USER:-}" ]; then
     # Build the mcpServers object
     MCP_SERVERS=""
 
-    # Email MCP (imap-email-mcp) — requires EMAIL_USER + EMAIL_PASS
+    # Email MCP (imap-email-mcp) — maps Railway env vars to package-expected names
+    # Package expects: IMAP_USER, IMAP_PASSWORD, IMAP_HOST, IMAP_PORT, SMTP_HOST, SMTP_PORT
     if [ -n "${EMAIL_PASS:-}" ]; then
         MCP_SERVERS="\"email\": {
       \"command\": \"npx\",
@@ -80,8 +81,8 @@ if [ -d "$REPO_DIR" ] && [ -n "${EMAIL_USER:-}" ]; then
         \"IMAP_PORT\": \"${EMAIL_IMAP_PORT:-993}\",
         \"SMTP_HOST\": \"${EMAIL_SMTP_HOST:-smtpout.secureserver.net}\",
         \"SMTP_PORT\": \"${EMAIL_SMTP_PORT:-465}\",
-        \"EMAIL_USER\": \"${EMAIL_USER}\",
-        \"EMAIL_PASS\": \"${EMAIL_PASS}\"
+        \"IMAP_USER\": \"${EMAIL_USER}\",
+        \"IMAP_PASSWORD\": \"${EMAIL_PASS}\"
       }
     }"
     fi
