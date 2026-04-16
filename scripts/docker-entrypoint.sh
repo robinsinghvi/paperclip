@@ -115,4 +115,35 @@ MCPEOF
     fi
 fi
 
+# Enforce correct agent_task_sessions.cwd for Gramms-cloud agents. Paperclip's
+# resolveWorkspaceForRun (server/src/services/heartbeat.ts) never consults
+# adapter_config.cwd for __heartbeat__ tasks (no project_id), so when an agent's
+# adapter_type changes (e.g., codex_local -> claude_local during model migration),
+# Paperclip inserts a fresh agent_task_sessions row with the default per-agent
+# fallback cwd (/paperclip/instances/default/workspaces/<agent-id>) and sticks
+# with it forever. Result: Claude Code spawns without access to the cloned repo,
+# AGENTS.md read fails with ENOENT, heartbeat no-ops at 6-20s, exit 0. This is
+# the regression that caused the 2026-04-16 blocked-task pileup.
+#
+# This guardrail runs idempotently on every container boot: it UPDATEs any
+# Gramms __heartbeat__ session whose cwd does not point at the cloned repo.
+# No-op when state is already correct. Failure-tolerant (WARN on any error).
+# Gated on GRAMMS_COMPANY_ID (set per-instance) and DATABASE_URL.
+if [ -n "${GRAMMS_COMPANY_ID:-}" ] && [ -n "${DATABASE_URL:-}" ] && [ -d "/paperclip/repos/gramms-ai-v2" ] && command -v psql >/dev/null 2>&1; then
+    echo "[entrypoint] enforcing agent_task_sessions.cwd for Gramms company ${GRAMMS_COMPANY_ID}"
+    GRAMMS_REPO_PATH="${GRAMMS_REPO_PATH:-/paperclip/repos/gramms-ai-v2}"
+    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+        UPDATE agent_task_sessions
+        SET session_params_json = jsonb_set(
+              COALESCE(session_params_json, '{}'::jsonb),
+              '{cwd}',
+              to_jsonb('${GRAMMS_REPO_PATH}'::text)
+            ),
+            updated_at = now()
+        WHERE company_id = '${GRAMMS_COMPANY_ID}'
+          AND task_key = '__heartbeat__'
+          AND (session_params_json->>'cwd') IS DISTINCT FROM '${GRAMMS_REPO_PATH}';
+    " 2>&1 | sed 's/^/[entrypoint][session-cwd] /' || echo "[entrypoint] WARN: agent_task_sessions cwd guardrail failed"
+fi
+
 exec gosu node "$@"
