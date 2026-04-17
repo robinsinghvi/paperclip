@@ -130,8 +130,14 @@ fi
 # No-op when state is already correct. Failure-tolerant (WARN on any error).
 # Gated on GRAMMS_COMPANY_ID (set per-instance) and DATABASE_URL.
 if [ -n "${GRAMMS_COMPANY_ID:-}" ] && [ -n "${DATABASE_URL:-}" ] && [ -d "/paperclip/repos/gramms-ai-v2" ] && command -v psql >/dev/null 2>&1; then
-    echo "[entrypoint] enforcing agent_task_sessions.cwd for Gramms company ${GRAMMS_COMPANY_ID}"
     GRAMMS_REPO_PATH="${GRAMMS_REPO_PATH:-/paperclip/repos/gramms-ai-v2}"
+
+    # Guardrail #1 — agent_task_sessions.session_params_json.cwd
+    #
+    # resolveWorkspaceForRun never consults adapter_config.cwd for __heartbeat__
+    # tasks; when adapter_type flips (codex_local -> claude_local), a fresh
+    # session row inherits the per-agent scratch dir. Force it back.
+    echo "[entrypoint] enforcing agent_task_sessions.cwd for Gramms company ${GRAMMS_COMPANY_ID}"
     psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
         UPDATE agent_task_sessions
         SET session_params_json = jsonb_set(
@@ -144,6 +150,31 @@ if [ -n "${GRAMMS_COMPANY_ID:-}" ] && [ -n "${DATABASE_URL:-}" ] && [ -d "/paper
           AND task_key = '__heartbeat__'
           AND (session_params_json->>'cwd') IS DISTINCT FROM '${GRAMMS_REPO_PATH}';
     " 2>&1 | sed 's/^/[entrypoint][session-cwd] /' || echo "[entrypoint] WARN: agent_task_sessions cwd guardrail failed"
+
+    # Guardrail #2 — agents.adapter_config.instructionsFilePath
+    #
+    # Every claude-local/codex-local/etc adapter reads instructionsFilePath via
+    # fs.readFile() (see e.g. packages/adapters/claude-local/src/server/execute.ts:369).
+    # Node resolves relative paths against the SERVER process cwd (/app), not the
+    # agent's cwd. So adapter_config.instructionsFilePath = "agents/ceo/AGENTS.md"
+    # resolves to /app/agents/ceo/AGENTS.md which doesn't exist, producing:
+    #   [paperclip] Warning: could not read agent instructions file
+    #   "agents/ceo/AGENTS.md": ENOENT
+    # …on every heartbeat. Claude Code then runs without the instructions file.
+    # Force every Gramms agent's path to absolute under /paperclip/repos/gramms-ai-v2.
+    echo "[entrypoint] enforcing agents.adapter_config.instructionsFilePath for Gramms"
+    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+        UPDATE agents
+        SET adapter_config = jsonb_set(
+              adapter_config,
+              '{instructionsFilePath}',
+              to_jsonb('${GRAMMS_REPO_PATH}/' || (adapter_config->>'instructionsFilePath'))
+            ),
+            updated_at = now()
+        WHERE company_id = '${GRAMMS_COMPANY_ID}'
+          AND (adapter_config->>'instructionsFilePath') IS NOT NULL
+          AND (adapter_config->>'instructionsFilePath') NOT LIKE '/%';
+    " 2>&1 | sed 's/^/[entrypoint][instr-path] /' || echo "[entrypoint] WARN: instructionsFilePath guardrail failed"
 fi
 
 exec gosu node "$@"
